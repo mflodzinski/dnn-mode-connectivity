@@ -11,6 +11,12 @@ import data
 import models
 import utils
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 
 parser = argparse.ArgumentParser(description='DNN curve training')
 parser.add_argument('--dir', type=str, default='/tmp/curve/', metavar='DIR',
@@ -63,16 +69,39 @@ parser.add_argument('--wd', type=float, default=1e-4, metavar='WD',
 
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
 
+parser.add_argument('--wandb', action='store_true', help='use wandb for logging')
+parser.add_argument('--wandb_project', type=str, default='mode-connectivity', help='wandb project name')
+parser.add_argument('--wandb_name', type=str, default=None, help='wandb run name')
+
 args = parser.parse_args()
+
+# Initialize wandb if requested
+use_wandb = args.wandb and WANDB_AVAILABLE
+if use_wandb:
+    wandb.init(
+        project=args.wandb_project,
+        name=args.wandb_name,
+        config=vars(args)
+    )
 
 os.makedirs(args.dir, exist_ok=True)
 with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
     f.write(' '.join(sys.argv))
     f.write('\n')
 
-torch.backends.cudnn.benchmark = True
+# Device selection: CUDA > MPS > CPU
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    torch.backends.cudnn.benchmark = True
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
+print(f'Using device: {device}')
+
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if device.type == 'cuda':
+    torch.cuda.manual_seed(args.seed)
 
 loaders, num_classes = data.loaders(
     args.dataset,
@@ -111,7 +140,7 @@ else:
         if args.init_linear:
             print('Linear initialization.')
             model.init_linear()
-model.cuda()
+model.to(device)
 
 
 def learning_rate_schedule(base_lr, epoch, total_epochs):
@@ -175,6 +204,18 @@ for epoch in range(start_epoch, args.epochs + 1):
     time_ep = time.time() - time_ep
     values = [epoch, lr, train_res['loss'], train_res['accuracy'], test_res['nll'],
               test_res['accuracy'], time_ep]
+
+    # Log to wandb if enabled
+    if use_wandb:
+        wandb.log({
+            'epoch': epoch,
+            'lr': lr,
+            'train/loss': train_res['loss'],
+            'train/accuracy': train_res['accuracy'],
+            'test/nll': test_res['nll'] if test_res['nll'] is not None else 0,
+            'test/accuracy': test_res['accuracy'] if test_res['accuracy'] is not None else 0,
+            'time_per_epoch': time_ep
+        }, step=epoch)
 
     table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='9.4f')
     if epoch % 40 == 1 or epoch == start_epoch:

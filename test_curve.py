@@ -40,9 +40,19 @@ parser.add_argument('--seed', type=int, default=1, metavar='S', help='random see
 
 args = parser.parse_args()
 
-torch.backends.cudnn.benchmark = True
+# Device selection: CUDA > MPS > CPU
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    torch.backends.cudnn.benchmark = True
+elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    device = torch.device('mps')
+else:
+    device = torch.device('cpu')
+print(f'Using device: {device}')
+
 torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+if device.type == 'cuda':
+    torch.cuda.manual_seed(args.seed)
 
 if args.dataset is not None:
     loaders, num_classes = data.loaders(
@@ -82,11 +92,11 @@ for base_model, path, k in zip(base, [args.init_start, args.init_end], [0, args.
 if args.init_linear:
     print('Linear initialization.')
     curve_model.init_linear()
-curve_model.cuda()
+curve_model.to(device)
 for base_model in base:
-    base_model.cuda()
+    base_model.to(device)
 
-t = torch.FloatTensor([0.0]).cuda()
+t = torch.FloatTensor([0.0]).to(device)
 for base_model, t_value in zip(base, [0.0, 1.0]):
     print('T: %f' % t_value)
     t.data.fill_(t_value)
@@ -96,7 +106,7 @@ for base_model, t_value in zip(base, [0.0, 1.0]):
 
     max_error = 0.0
     for i, (input, _) in enumerate(loader):
-        input = input.cuda(async=True)
+        input = input.to(device, non_blocking=True)
 
         base_ouput = base_model(input)
         curve_output = curve_model(input, t)

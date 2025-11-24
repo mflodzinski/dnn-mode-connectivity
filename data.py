@@ -41,6 +41,10 @@ class Transforms:
 
 def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
             shuffle_train=True):
+    # MPS doesn't work well with multiprocessing, use 0 workers
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        num_workers = 0
+
     ds = getattr(torchvision.datasets, dataset)
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
@@ -51,15 +55,16 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
         test_set = ds(path, train=False, download=True, transform=transform.test)
     else:
         print("Using train (45000) + validation (5000)")
-        train_set.train_data = train_set.train_data[:-5000]
-        train_set.train_labels = train_set.train_labels[:-5000]
+        train_set.data = train_set.data[:-5000]
+        train_set.targets = train_set.targets[:-5000]
 
         test_set = ds(path, train=True, download=True, transform=transform.test)
         test_set.train = False
-        test_set.test_data = test_set.train_data[-5000:]
-        test_set.test_labels = test_set.train_labels[-5000:]
-        delattr(test_set, 'train_data')
-        delattr(test_set, 'train_labels')
+        test_set.data = train_set.data[-5000:]
+        test_set.targets = train_set.targets[-5000:]
+
+    # pin_memory not supported on MPS
+    pin_mem = not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
 
     return {
                'train': torch.utils.data.DataLoader(
@@ -67,13 +72,13 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
                    batch_size=batch_size,
                    shuffle=shuffle_train,
                    num_workers=num_workers,
-                   pin_memory=True
+                   pin_memory=pin_mem
                ),
                'test': torch.utils.data.DataLoader(
                    test_set,
                    batch_size=batch_size,
                    shuffle=False,
                    num_workers=num_workers,
-                   pin_memory=True
+                   pin_memory=pin_mem
                ),
-           }, max(train_set.train_labels) + 1
+           }, max(train_set.targets) + 1
