@@ -221,42 +221,49 @@ for epoch in range(start_epoch, args.epochs + 1):
             test_res = utils.test(loaders['test'], model, criterion, regularizer)
 
     # Early stopping logic (only for non-curve models)
-    if args.early_stopping and args.curve is None and args.split_test_from_train:
-        val_error = 100.0 - val_res['accuracy']
-
-        # Check if validation error improved
-        if val_error < (best_val_error - args.min_delta):
-            best_val_error = val_error
-            best_epoch = epoch
-            patience_counter = 0
-
-            # Save best model checkpoint
-            utils.save_checkpoint(
-                args.dir,
-                epoch,
-                name='checkpoint-best',
-                model_state=model.state_dict(),
-                optimizer_state=optimizer.state_dict(),
-                val_error=val_error
-            )
-
-            # Save best epoch info
-            with open(os.path.join(args.dir, 'best_epoch.txt'), 'w') as f:
-                f.write(f'Best epoch: {best_epoch}\n')
-                f.write(f'Best val error: {best_val_error:.4f}%\n')
-
-            print(f'✓ New best val error: {best_val_error:.4f}% (patience reset)')
+    if args.early_stopping and args.curve is None:
+        # Use validation set if available (3-way split), otherwise use test set
+        if args.split_test_from_train and val_res['accuracy'] is not None:
+            val_error = 100.0 - val_res['accuracy']
+        elif test_res['accuracy'] is not None:
+            val_error = 100.0 - test_res['accuracy']
         else:
-            patience_counter += 1
-            print(f'  No improvement (patience: {patience_counter}/{args.patience})')
+            val_error = None
 
-            # Check if patience exceeded
-            if patience_counter >= args.patience:
-                print(f'\n{"="*70}')
-                print(f'Early stopping triggered at epoch {epoch}')
-                print(f'Best val error: {best_val_error:.4f}% at epoch {best_epoch}')
-                print(f'{"="*70}\n')
-                early_stopped = True
+        if val_error is not None:
+            # Check if validation error improved
+            if val_error < (best_val_error - args.min_delta):
+                best_val_error = val_error
+                best_epoch = epoch
+                patience_counter = 0
+
+                # Save best model checkpoint
+                utils.save_checkpoint(
+                    args.dir,
+                    epoch,
+                    name='checkpoint-best',
+                    model_state=model.state_dict(),
+                    optimizer_state=optimizer.state_dict(),
+                    val_error=val_error
+                )
+
+                # Save best epoch info
+                with open(os.path.join(args.dir, 'best_epoch.txt'), 'w') as f:
+                    f.write(f'Best epoch: {best_epoch}\n')
+                    f.write(f'Best val error: {best_val_error:.4f}%\n')
+
+                print(f'✓ New best val error: {best_val_error:.4f}% (patience reset)')
+            else:
+                patience_counter += 1
+                print(f'  No improvement (patience: {patience_counter}/{args.patience})')
+
+                # Check if patience exceeded
+                if patience_counter >= args.patience:
+                    print(f'\n{"="*70}')
+                    print(f'Early stopping triggered at epoch {epoch}')
+                    print(f'Best val error: {best_val_error:.4f}% at epoch {best_epoch}')
+                    print(f'{"="*70}\n')
+                    early_stopped = True
 
     # Regular periodic checkpoint saving
     if epoch % args.save_freq == 0:
@@ -307,6 +314,9 @@ for epoch in range(start_epoch, args.epochs + 1):
                 'test/accuracy': test_res['accuracy'] if test_res['accuracy'] is not None else 0,
                 'test/error': 100.0 - test_res['accuracy'] if test_res['accuracy'] is not None else 100,
             })
+            if args.early_stopping:
+                log_dict['best_val_error'] = best_val_error
+                log_dict['best_epoch'] = best_epoch
 
         wandb.log(log_dict, step=epoch)
 
