@@ -74,7 +74,7 @@ checkpoint = torch.load(args.ckpt)
 model.load_state_dict(checkpoint['model_state'])
 
 criterion = F.cross_entropy
-regularizer = curves.l2_regularizer(args.wd)
+regularizer = None  # Disabled to match linear evaluation
 
 T = args.num_points
 ts = np.linspace(0.0, 1.0, T)
@@ -87,6 +87,7 @@ te_acc = np.zeros(T)
 tr_err = np.zeros(T)
 te_err = np.zeros(T)
 dl = np.zeros(T)
+l2_norm = np.zeros(T)
 
 previous_weights = None
 
@@ -111,6 +112,9 @@ for i, t_value in enumerate(ts):
     te_nll[i] = te_res['nll']
     te_acc[i] = te_res['accuracy']
     te_err[i] = 100.0 - te_acc[i]
+
+    # Compute L2 norm of weights at this point
+    l2_norm[i] = np.sqrt(np.sum(np.square(weights)))
 
     values = [t, tr_loss[i], tr_nll[i], tr_err[i], te_nll[i], te_err[i]]
     table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='10.4f')
@@ -152,6 +156,7 @@ np.savez(
     os.path.join(args.dir, 'curve.npz'),
     ts=ts,
     dl=dl,
+    l2_norm=l2_norm,
     tr_loss=tr_loss,
     tr_loss_min=tr_loss_min,
     tr_loss_max=tr_loss_max,
