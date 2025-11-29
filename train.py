@@ -73,6 +73,15 @@ parser.add_argument('--wandb', action='store_true', help='use wandb for logging'
 parser.add_argument('--wandb_project', type=str, default='mode-connectivity', help='wandb project name')
 parser.add_argument('--wandb_name', type=str, default=None, help='wandb run name')
 
+# Early stopping parameters
+parser.add_argument('--early_stopping', action='store_true', help='enable early stopping based on validation error')
+parser.add_argument('--patience', type=int, default=20, metavar='N',
+                    help='early stopping patience (default: 20)')
+parser.add_argument('--min_delta', type=float, default=0.0, metavar='DELTA',
+                    help='minimum improvement to count as better (default: 0.0)')
+parser.add_argument('--split_test_from_train', action='store_true',
+                    help='split training data into train/val/test (40K/5K/5K)')
+
 args = parser.parse_args()
 
 # Initialize wandb if requested
@@ -109,7 +118,8 @@ loaders, num_classes = data.loaders(
     args.batch_size,
     args.num_workers,
     args.transform,
-    args.use_test
+    args.use_test,
+    split_test_from_train=args.split_test_from_train
 )
 
 architecture = getattr(models, args.model)
@@ -173,6 +183,8 @@ if args.resume is not None:
     optimizer.load_state_dict(checkpoint['optimizer_state'])
 
 columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_nll', 'te_acc', 'time']
+if args.split_test_from_train:
+    columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'val_nll', 'val_acc', 'te_nll', 'te_acc', 'time']
 
 utils.save_checkpoint(
     args.dir,
@@ -181,8 +193,15 @@ utils.save_checkpoint(
     optimizer_state=optimizer.state_dict()
 )
 
+# Early stopping variables
+best_val_error = float('inf')
+best_epoch = 0
+patience_counter = 0
+early_stopped = False
+
 has_bn = utils.check_bn(model)
 test_res = {'loss': None, 'accuracy': None, 'nll': None}
+val_res = {'loss': None, 'accuracy': None, 'nll': None}
 for epoch in range(start_epoch, args.epochs + 1):
     time_ep = time.time()
 
@@ -190,9 +209,56 @@ for epoch in range(start_epoch, args.epochs + 1):
     utils.adjust_learning_rate(optimizer, lr)
 
     train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer)
-    if args.curve is None or not has_bn:
-        test_res = utils.test(loaders['test'], model, criterion, regularizer)
 
+    # Evaluate on validation set if 3-way split is used
+    if args.split_test_from_train and 'val' in loaders:
+        if args.curve is None or not has_bn:
+            val_res = utils.test(loaders['val'], model, criterion, regularizer)
+            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+    else:
+        # Standard 2-way split: test is actually validation
+        if args.curve is None or not has_bn:
+            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+
+    # Early stopping logic (only for non-curve models)
+    if args.early_stopping and args.curve is None and args.split_test_from_train:
+        val_error = 100.0 - val_res['accuracy']
+
+        # Check if validation error improved
+        if val_error < (best_val_error - args.min_delta):
+            best_val_error = val_error
+            best_epoch = epoch
+            patience_counter = 0
+
+            # Save best model checkpoint
+            utils.save_checkpoint(
+                args.dir,
+                epoch,
+                name='checkpoint-best',
+                model_state=model.state_dict(),
+                optimizer_state=optimizer.state_dict(),
+                val_error=val_error
+            )
+
+            # Save best epoch info
+            with open(os.path.join(args.dir, 'best_epoch.txt'), 'w') as f:
+                f.write(f'Best epoch: {best_epoch}\n')
+                f.write(f'Best val error: {best_val_error:.4f}%\n')
+
+            print(f'✓ New best val error: {best_val_error:.4f}% (patience reset)')
+        else:
+            patience_counter += 1
+            print(f'  No improvement (patience: {patience_counter}/{args.patience})')
+
+            # Check if patience exceeded
+            if patience_counter >= args.patience:
+                print(f'\n{"="*70}')
+                print(f'Early stopping triggered at epoch {epoch}')
+                print(f'Best val error: {best_val_error:.4f}% at epoch {best_epoch}')
+                print(f'{"="*70}\n')
+                early_stopped = True
+
+    # Regular periodic checkpoint saving
     if epoch % args.save_freq == 0:
         utils.save_checkpoint(
             args.dir,
@@ -202,20 +268,47 @@ for epoch in range(start_epoch, args.epochs + 1):
         )
 
     time_ep = time.time() - time_ep
-    values = [epoch, lr, train_res['loss'], train_res['accuracy'], test_res['nll'],
-              test_res['accuracy'], time_ep]
+
+    # Prepare values for logging
+    if args.split_test_from_train:
+        values = [epoch, lr, train_res['loss'], train_res['accuracy'],
+                  val_res['nll'], val_res['accuracy'],
+                  test_res['nll'], test_res['accuracy'], time_ep]
+    else:
+        values = [epoch, lr, train_res['loss'], train_res['accuracy'],
+                  test_res['nll'], test_res['accuracy'], time_ep]
 
     # Log to wandb if enabled
     if use_wandb:
-        wandb.log({
+        log_dict = {
             'epoch': epoch,
             'lr': lr,
             'train/loss': train_res['loss'],
             'train/accuracy': train_res['accuracy'],
-            'test/nll': test_res['nll'] if test_res['nll'] is not None else 0,
-            'test/accuracy': test_res['accuracy'] if test_res['accuracy'] is not None else 0,
+            'train/error': 100.0 - train_res['accuracy'],
             'time_per_epoch': time_ep
-        }, step=epoch)
+        }
+
+        if args.split_test_from_train and 'val' in loaders:
+            log_dict.update({
+                'val/nll': val_res['nll'] if val_res['nll'] is not None else 0,
+                'val/accuracy': val_res['accuracy'] if val_res['accuracy'] is not None else 0,
+                'val/error': 100.0 - val_res['accuracy'] if val_res['accuracy'] is not None else 100,
+                'test/nll': test_res['nll'] if test_res['nll'] is not None else 0,
+                'test/accuracy': test_res['accuracy'] if test_res['accuracy'] is not None else 0,
+                'test/error': 100.0 - test_res['accuracy'] if test_res['accuracy'] is not None else 100,
+            })
+            if args.early_stopping:
+                log_dict['best_val_error'] = best_val_error
+                log_dict['best_epoch'] = best_epoch
+        else:
+            log_dict.update({
+                'test/nll': test_res['nll'] if test_res['nll'] is not None else 0,
+                'test/accuracy': test_res['accuracy'] if test_res['accuracy'] is not None else 0,
+                'test/error': 100.0 - test_res['accuracy'] if test_res['accuracy'] is not None else 100,
+            })
+
+        wandb.log(log_dict, step=epoch)
 
     table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='9.4f')
     if epoch % 40 == 1 or epoch == start_epoch:
@@ -225,10 +318,23 @@ for epoch in range(start_epoch, args.epochs + 1):
         table = table.split('\n')[2]
     print(table)
 
-if args.epochs % args.save_freq != 0:
+    # Break if early stopping triggered
+    if early_stopped:
+        break
+
+# Save final checkpoint if not already saved
+final_epoch = epoch if early_stopped else args.epochs
+if final_epoch % args.save_freq != 0:
     utils.save_checkpoint(
         args.dir,
-        args.epochs,
+        final_epoch,
         model_state=model.state_dict(),
         optimizer_state=optimizer.state_dict()
     )
+
+# Log early stopping info to wandb
+if use_wandb and args.early_stopping:
+    wandb.run.summary['early_stopped'] = early_stopped
+    wandb.run.summary['stopped_at_epoch'] = final_epoch
+    wandb.run.summary['best_val_error'] = best_val_error
+    wandb.run.summary['best_epoch'] = best_epoch

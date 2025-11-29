@@ -40,7 +40,7 @@ class Transforms:
 
 
 def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
-            shuffle_train=True):
+            shuffle_train=True, split_test_from_train=False):
     # MPS doesn't work well with multiprocessing, use 0 workers
     if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         num_workers = 0
@@ -53,32 +53,74 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     if use_test:
         print('You are going to run models on the test set. Are you sure?')
         test_set = ds(path, train=False, download=True, transform=transform.test)
+        val_set = None
     else:
-        print("Using train (45000) + validation (5000)")
-        train_set.data = train_set.data[:-5000]
-        train_set.targets = train_set.targets[:-5000]
+        if split_test_from_train:
+            # 3-way split: train (40K) + val (5K) + test (5K) from training data
+            print("Using train (40000) + validation (5000) + test (5000)")
+            full_train_data = train_set.data
+            full_train_targets = train_set.targets
 
-        test_set = ds(path, train=True, download=True, transform=transform.test)
-        test_set.train = False
-        test_set.data = train_set.data[-5000:]
-        test_set.targets = train_set.targets[-5000:]
+            # Train: indices 0-39999
+            train_set.data = full_train_data[:40000]
+            train_set.targets = full_train_targets[:40000]
+
+            # Validation: indices 40000-44999
+            val_set = ds(path, train=True, download=True, transform=transform.test)
+            val_set.train = False
+            val_set.data = full_train_data[40000:45000]
+            val_set.targets = full_train_targets[40000:45000]
+
+            # Test: indices 45000-49999
+            test_set = ds(path, train=True, download=True, transform=transform.test)
+            test_set.train = False
+            test_set.data = full_train_data[45000:50000]
+            test_set.targets = full_train_targets[45000:50000]
+        else:
+            # 2-way split: train (45K) + validation (5K) - original behavior but fixed
+            print("Using train (45000) + validation (5000)")
+            full_train_data = train_set.data
+            full_train_targets = train_set.targets
+
+            # Train: indices 0-44999
+            train_set.data = full_train_data[:45000]
+            train_set.targets = full_train_targets[:45000]
+
+            # Validation: indices 45000-49999
+            test_set = ds(path, train=True, download=True, transform=transform.test)
+            test_set.train = False
+            test_set.data = full_train_data[45000:50000]
+            test_set.targets = full_train_targets[45000:50000]
+            val_set = None
 
     # pin_memory not supported on MPS
     pin_mem = not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
 
-    return {
-               'train': torch.utils.data.DataLoader(
-                   train_set,
-                   batch_size=batch_size,
-                   shuffle=shuffle_train,
-                   num_workers=num_workers,
-                   pin_memory=pin_mem
-               ),
-               'test': torch.utils.data.DataLoader(
-                   test_set,
-                   batch_size=batch_size,
-                   shuffle=False,
-                   num_workers=num_workers,
-                   pin_memory=pin_mem
-               ),
-           }, max(train_set.targets) + 1
+    loaders_dict = {
+        'train': torch.utils.data.DataLoader(
+            train_set,
+            batch_size=batch_size,
+            shuffle=shuffle_train,
+            num_workers=num_workers,
+            pin_memory=pin_mem
+        ),
+        'test': torch.utils.data.DataLoader(
+            test_set,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_mem
+        ),
+    }
+
+    # Add validation loader if 3-way split is used
+    if val_set is not None:
+        loaders_dict['val'] = torch.utils.data.DataLoader(
+            val_set,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_mem
+        )
+
+    return loaders_dict, max(train_set.targets) + 1
