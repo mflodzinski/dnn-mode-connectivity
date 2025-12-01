@@ -199,6 +199,10 @@ best_epoch = 0
 patience_counter = 0
 early_stopped = False
 
+# Track L2 norm of middle point for curve models
+middle_point_l2_norms = []
+epochs_list = []
+
 has_bn = utils.check_bn(model)
 test_res = {'loss': None, 'accuracy': None, 'nll': None}
 val_res = {'loss': None, 'accuracy': None, 'nll': None}
@@ -276,6 +280,22 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     time_ep = time.time() - time_ep
 
+    # Compute L2 norm of middle point for curve models
+    middle_point_l2_norm = None
+    if args.curve is not None:
+        # For Bezier curves with 3 bends, the middle point is bend index 1
+        # Calculate L2 norm of the middle trainable point
+        l2_sum = 0.0
+        for name, param in model.named_parameters():
+            # Middle point parameters have suffix '_1' for 3-bend Bezier curves
+            if '_1' in name and param.requires_grad:
+                l2_sum += torch.sum(param ** 2).item()
+        middle_point_l2_norm = torch.sqrt(torch.tensor(l2_sum)).item()
+
+        # Track for saving later
+        epochs_list.append(epoch)
+        middle_point_l2_norms.append(middle_point_l2_norm)
+
     # Prepare values for logging
     if args.split_test_from_train:
         values = [epoch, lr, train_res['loss'], train_res['accuracy'],
@@ -295,6 +315,10 @@ for epoch in range(start_epoch, args.epochs + 1):
             'train/error': 100.0 - train_res['accuracy'],
             'time_per_epoch': time_ep
         }
+
+        # Add L2 norm of middle point for curve models
+        if middle_point_l2_norm is not None:
+            log_dict['curve/middle_point_l2_norm'] = middle_point_l2_norm
 
         if args.split_test_from_train and 'val' in loaders:
             log_dict.update({
@@ -348,3 +372,14 @@ if use_wandb and args.early_stopping:
     wandb.run.summary['stopped_at_epoch'] = final_epoch
     wandb.run.summary['best_val_error'] = best_val_error
     wandb.run.summary['best_epoch'] = best_epoch
+
+# Save L2 norm history for curve models
+if args.curve is not None and len(middle_point_l2_norms) > 0:
+    import numpy as np
+    l2_norm_file = os.path.join(args.dir, 'middle_point_l2_norms.npz')
+    np.savez(
+        l2_norm_file,
+        epochs=np.array(epochs_list),
+        l2_norms=np.array(middle_point_l2_norms)
+    )
+    print(f'\nSaved middle point L2 norm history to: {l2_norm_file}')
