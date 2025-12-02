@@ -201,6 +201,7 @@ early_stopped = False
 
 # Track L2 norm of middle point for curve models
 middle_point_l2_norms = []
+interpolated_l2_norms = []
 epochs_list = []
 
 has_bn = utils.check_bn(model)
@@ -282,9 +283,9 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     # Compute L2 norm of middle point for curve models
     middle_point_l2_norm = None
+    interpolated_l2_norm = None
     if args.curve is not None:
-        # For Bezier curves with 3 bends, the middle point is bend index 1
-        # Calculate L2 norm of the middle trainable point
+        # 1. Calculate L2 norm of the middle trainable point (raw parameters)
         l2_sum = 0.0
         for name, param in model.named_parameters():
             # Middle point parameters have suffix '_1' for 3-bend Bezier curves
@@ -292,9 +293,15 @@ for epoch in range(start_epoch, args.epochs + 1):
                 l2_sum += torch.sum(param ** 2).item()
         middle_point_l2_norm = torch.sqrt(torch.tensor(l2_sum)).item()
 
+        # 2. Calculate L2 norm at t=0.5 (interpolated model)
+        t = torch.FloatTensor([0.5]).to(device)
+        weights = model.weights(t)
+        interpolated_l2_norm = np.sqrt(np.sum(np.square(weights)))
+
         # Track for saving later
         epochs_list.append(epoch)
         middle_point_l2_norms.append(middle_point_l2_norm)
+        interpolated_l2_norms.append(interpolated_l2_norm)
 
     # Prepare values for logging
     if args.split_test_from_train:
@@ -319,6 +326,7 @@ for epoch in range(start_epoch, args.epochs + 1):
         # Add L2 norm of middle point for curve models
         if middle_point_l2_norm is not None:
             log_dict['curve/middle_point_l2_norm'] = middle_point_l2_norm
+            log_dict['curve/interpolated_l2_norm'] = interpolated_l2_norm
 
         if args.split_test_from_train and 'val' in loaders:
             log_dict.update({
@@ -376,10 +384,14 @@ if use_wandb and args.early_stopping:
 # Save L2 norm history for curve models
 if args.curve is not None and len(middle_point_l2_norms) > 0:
     import numpy as np
-    l2_norm_file = os.path.join(args.dir, 'middle_point_l2_norms.npz')
+    # Save to evaluations directory (create if needed)
+    eval_dir = args.dir.replace('/checkpoints', '/evaluations')
+    os.makedirs(eval_dir, exist_ok=True)
+    l2_norm_file = os.path.join(eval_dir, 'middle_point_l2_norms.npz')
     np.savez(
         l2_norm_file,
         epochs=np.array(epochs_list),
-        l2_norms=np.array(middle_point_l2_norms)
+        l2_norms=np.array(middle_point_l2_norms),
+        interpolated_l2_norms=np.array(interpolated_l2_norms)
     )
     print(f'\nSaved middle point L2 norm history to: {l2_norm_file}')
