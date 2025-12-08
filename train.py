@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import os
+import signal
 import sys
 import tabulate
 import time
@@ -208,7 +209,36 @@ epochs_list = []
 has_bn = utils.check_bn(model)
 test_res = {'loss': None, 'accuracy': None, 'nll': None}
 val_res = {'loss': None, 'accuracy': None, 'nll': None}
+
+# Signal handler for graceful shutdown on Ctrl+C
+interrupted = False
+def signal_handler(sig, frame):
+    global interrupted
+    print('\n' + '='*70)
+    print('INTERRUPT SIGNAL RECEIVED (Ctrl+C)')
+    print('='*70)
+    print('Saving checkpoint before exit...')
+    interrupted = True
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
 for epoch in range(start_epoch, args.epochs + 1):
+    # Check if interrupted at the start of epoch
+    if interrupted:
+        print(f'Saving checkpoint at epoch {epoch-1}...')
+        utils.save_checkpoint(
+            args.dir,
+            epoch - 1,
+            name='checkpoint-interrupted',
+            model_state=model.state_dict(),
+            optimizer_state=optimizer.state_dict()
+        )
+        print(f'✓ Checkpoint saved to: {args.dir}/checkpoint-interrupted-{epoch-1}.pt')
+        print('Exiting gracefully.')
+        sys.exit(0)
+
+
     time_ep = time.time()
 
     lr = learning_rate_schedule(args.lr, epoch, args.epochs)
@@ -360,6 +390,22 @@ for epoch in range(start_epoch, args.epochs + 1):
     else:
         table = table.split('\n')[2]
     print(table)
+
+    # Check if interrupted at the end of epoch
+    if interrupted:
+        print(f'\n{"="*70}')
+        print(f'Saving checkpoint at epoch {epoch}...')
+        utils.save_checkpoint(
+            args.dir,
+            epoch,
+            name='checkpoint-interrupted',
+            model_state=model.state_dict(),
+            optimizer_state=optimizer.state_dict()
+        )
+        print(f'✓ Checkpoint saved to: {args.dir}/checkpoint-interrupted-{epoch}.pt')
+        print('Exiting gracefully.')
+        print('='*70)
+        sys.exit(0)
 
     # Break if early stopping triggered
     if early_stopped:
