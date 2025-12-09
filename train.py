@@ -315,13 +315,14 @@ if start_epoch == 1:  # Only for new training, not resumed
 
         # For curve models, evaluate at t=0.5 (midpoint)
         if args.curve is not None:
+            t_midpoint = torch.tensor([0.5]).to(device)
             if has_bn:
-                utils.update_bn(loaders['train'], model, device=device, t=torch.tensor([0.5]))
+                utils.update_bn(loaders['train'], model, device=device, t=t_midpoint)
             if args.split_test_from_train and 'val' in loaders:
-                val_res = utils.test(loaders['val'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
-                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
+                val_res = utils.test(loaders['val'], model, criterion, regularizer, device=device, t=t_midpoint)
+                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=t_midpoint)
             else:
-                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
+                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=t_midpoint)
 
         # Print initial metrics
         print(f"Initial test loss: {test_res['loss']:.4f}")
