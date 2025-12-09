@@ -300,6 +300,56 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
+# Evaluate initial model (epoch 0) before training
+if start_epoch == 1:  # Only for new training, not resumed
+    print("\n" + "=" * 80)
+    print("INITIAL EVALUATION (Epoch 0 - Before Training)")
+    print("=" * 80)
+
+    if args.curve is None or not has_bn:
+        if args.split_test_from_train and 'val' in loaders:
+            val_res = utils.test(loaders['val'], model, criterion, regularizer)
+            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+        else:
+            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+
+        # For curve models, evaluate at t=0.5 (midpoint)
+        if args.curve is not None:
+            if has_bn:
+                utils.update_bn(loaders['train'], model, device=device, t=torch.tensor([0.5]))
+            if args.split_test_from_train and 'val' in loaders:
+                val_res = utils.test(loaders['val'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
+                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
+            else:
+                test_res = utils.test(loaders['test'], model, criterion, regularizer, device=device, t=torch.tensor([0.5]))
+
+        # Print initial metrics
+        print(f"Initial test loss: {test_res['loss']:.4f}")
+        print(f"Initial test acc:  {test_res['accuracy']:.2f}%")
+        print(f"Initial test err:  {100.0 - test_res['accuracy']:.2f}%")
+        if args.split_test_from_train and val_res['accuracy'] is not None:
+            print(f"Initial val loss:  {val_res['loss']:.4f}")
+            print(f"Initial val acc:   {val_res['accuracy']:.2f}%")
+
+        # Log to WandB
+        if use_wandb:
+            log_dict = {
+                'epoch': 0,
+                'test/loss': test_res['loss'],
+                'test/accuracy': test_res['accuracy'],
+                'test/error': 100.0 - test_res['accuracy'],
+            }
+            if args.split_test_from_train and val_res['accuracy'] is not None:
+                log_dict.update({
+                    'val/loss': val_res['loss'],
+                    'val/accuracy': val_res['accuracy'],
+                    'val/error': 100.0 - val_res['accuracy'],
+                })
+            wandb.log(log_dict, step=0)
+            print("✓ Initial metrics logged to WandB")
+
+        print("=" * 80 + "\n")
+
 for epoch in range(start_epoch, args.epochs + 1):
     # Check if interrupted at the start of epoch
     if interrupted:
