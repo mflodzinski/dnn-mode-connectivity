@@ -40,7 +40,7 @@ def save_checkpoint(dir, epoch, name='checkpoint', **kwargs):
     torch.save(state, filepath)
 
 
-def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedule=None, device=None):
+def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedule=None, device=None, projection_fn=None):
     if device is None:
         device = next(model.parameters()).device
     loss_sum = 0.0
@@ -63,6 +63,10 @@ def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedu
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # Apply projection if provided (e.g., for symmetry plane constraint)
+        if projection_fn is not None:
+            projection_fn()
 
         loss_sum += loss.item() * input.size(0)
         pred = output.data.argmax(1, keepdim=True)

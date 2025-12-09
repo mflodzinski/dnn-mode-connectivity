@@ -84,6 +84,10 @@ parser.add_argument('--min_delta', type=float, default=0.0, metavar='DELTA',
 parser.add_argument('--split_test_from_train', action='store_true',
                     help='split training data into train/val/test (40K/5K/5K)')
 
+# Symmetry plane projection
+parser.add_argument('--project_symmetry_plane', action='store_true',
+                    help='project middle bend to symmetry plane after each optimizer step (requires num_bends=3, fix_start=True, fix_end=True)')
+
 args = parser.parse_args()
 
 # Initialize wandb if requested
@@ -153,6 +157,79 @@ else:
             print('Linear initialization.')
             model.init_linear()
 model.to(device)
+
+# Validate symmetry plane projection requirements
+if args.project_symmetry_plane:
+    if args.curve is None:
+        raise ValueError("--project_symmetry_plane requires --curve to be specified")
+    if args.num_bends != 3:
+        raise ValueError("--project_symmetry_plane requires --num_bends=3 (got {})".format(args.num_bends))
+    if not args.fix_start or not args.fix_end:
+        raise ValueError("--project_symmetry_plane requires --fix_start and --fix_end")
+    if args.init_start is None or args.init_end is None:
+        raise ValueError("--project_symmetry_plane requires --init_start and --init_end")
+    print("\n" + "=" * 80)
+    print("SYMMETRY PLANE PROJECTION ENABLED")
+    print("=" * 80)
+    print("Middle bend will be projected to symmetry plane after each optimizer step")
+    print("Plane constraint: n · (θ - m) = 0")
+    print("  where n = w₂ - w₁ (normal vector)")
+    print("        m = (w₁ + w₂) / 2 (midpoint)")
+    print("=" * 80 + "\n")
+
+
+def project_to_symmetry_plane(model, midpoint_params, normal_params):
+    """
+    Project middle bend (index=1) parameters to symmetry plane.
+
+    The plane is defined by: n · (θ - m) = 0
+    Projection: θ_new = θ - ((θ - m)·n / ||n||²) * n
+    """
+    all_params = list(model.net.parameters())
+    num_bends = model.num_bends
+
+    with torch.no_grad():
+        for i in range(0, len(all_params), num_bends):
+            theta_param = all_params[i + 1]  # Middle bend
+            midpoint_param = midpoint_params[i // num_bends]
+            normal_param = normal_params[i // num_bends]
+
+            # Compute displacement from midpoint
+            displacement = theta_param - midpoint_param
+
+            # Compute dot product and scale
+            dot_product = torch.sum(displacement * normal_param)
+            normal_norm_sq = torch.sum(normal_param ** 2)
+            scale = dot_product / (normal_norm_sq + 1e-10)
+
+            # Project: θ_new = θ - scale * n
+            theta_param.sub_(scale * normal_param)
+
+
+def compute_symmetry_plane_params(model):
+    """Compute midpoint and normal vector from endpoints."""
+    all_params = list(model.net.parameters())
+    num_bends = model.num_bends
+
+    midpoint_params = []
+    normal_params = []
+
+    for i in range(0, len(all_params), num_bends):
+        w1_param = all_params[i]      # First endpoint (index 0)
+        w2_param = all_params[i + 2]  # Second endpoint (index 2)
+
+        midpoint = (w1_param + w2_param) / 2.0
+        normal = w2_param - w1_param
+
+        midpoint_params.append(midpoint)
+        normal_params.append(normal)
+
+    return midpoint_params, normal_params
+
+
+# Compute symmetry plane parameters if needed (once, stays constant)
+if args.project_symmetry_plane:
+    midpoint_params, normal_params = compute_symmetry_plane_params(model)
 
 
 def learning_rate_schedule(base_lr, epoch, total_epochs):
@@ -244,7 +321,12 @@ for epoch in range(start_epoch, args.epochs + 1):
     lr = learning_rate_schedule(args.lr, epoch, args.epochs)
     utils.adjust_learning_rate(optimizer, lr)
 
-    train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer)
+    # Prepare projection function if symmetry plane is enabled
+    projection_fn = None
+    if args.project_symmetry_plane:
+        projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
+
+    train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer, projection_fn=projection_fn)
 
     # Evaluate on validation set if 3-way split is used
     if args.split_test_from_train and 'val' in loaders:
