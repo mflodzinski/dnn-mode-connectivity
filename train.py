@@ -107,7 +107,6 @@ with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
 # Device selection: CUDA > MPS > CPU
 if torch.cuda.is_available():
     device = torch.device('cuda')
-    torch.backends.cudnn.benchmark = True
 elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
     device = torch.device('mps')
 else:
@@ -117,6 +116,10 @@ print(f'Using device: {device}')
 torch.manual_seed(args.seed)
 if device.type == 'cuda':
     torch.cuda.manual_seed(args.seed)
+    # Set benchmark to False for full reproducibility when using deterministic mode
+    # If cudnn.deterministic is already True (set by wrapper), respect it
+    if not torch.backends.cudnn.deterministic:
+        torch.backends.cudnn.benchmark = True
 
 loaders, num_classes = data.loaders(
     args.dataset,
