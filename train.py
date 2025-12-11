@@ -55,6 +55,19 @@ parser.add_argument('--fix_end', dest='fix_end', action='store_true',
 parser.set_defaults(init_linear=True)
 parser.add_argument('--init_linear_off', dest='init_linear', action='store_false',
                     help='turns off linear initialization of intermediate points (default: on)')
+
+# Advanced initialization options
+parser.add_argument('--init_method', type=str, default='linear',
+                    choices=['linear', 'biased', 'perturbed', 'sphere'],
+                    help='initialization method: linear (default), biased (custom alpha), perturbed (with noise), sphere (constrained to sphere)')
+parser.add_argument('--init_alpha', type=float, default=0.5,
+                    help='interpolation ratio for biased/perturbed/sphere init (default: 0.5 = midpoint)')
+parser.add_argument('--init_noise', type=float, default=0.01,
+                    help='noise scale for perturbed/sphere init (default: 0.01)')
+parser.add_argument('--init_inside_sphere', dest='init_inside_sphere', action='store_true',
+                    help='for sphere init: project inside sphere (default: outside)')
+parser.set_defaults(init_inside_sphere=False)
+
 parser.add_argument('--resume', type=str, default=None, metavar='CKPT',
                     help='checkpoint to resume training from (default: None)')
 
@@ -157,8 +170,22 @@ else:
                 base_model.load_state_dict(checkpoint['model_state'])
                 model.import_base_parameters(base_model, k)
         if args.init_linear:
-            print('Linear initialization.')
-            model.init_linear()
+            # Choose initialization method
+            if args.init_method == 'linear':
+                print('Linear initialization (default midpoint).')
+                model.init_linear()
+            elif args.init_method == 'biased':
+                print(f'Biased linear initialization with alpha={args.init_alpha}')
+                model.init_linear_custom(alpha=args.init_alpha)
+            elif args.init_method == 'perturbed':
+                print(f'Perturbed linear initialization: alpha={args.init_alpha}, noise_scale={args.init_noise}')
+                model.init_perturbed_linear(alpha=args.init_alpha, noise_scale=args.init_noise)
+            elif args.init_method == 'sphere':
+                inside_str = 'inside' if args.init_inside_sphere else 'outside'
+                print(f'Sphere-constrained initialization: alpha={args.init_alpha}, noise={args.init_noise}, {inside_str} sphere')
+                model.init_sphere_constrained(alpha=args.init_alpha, noise_scale=args.init_noise, inside=args.init_inside_sphere)
+            else:
+                raise ValueError(f'Unknown init_method: {args.init_method}')
 model.to(device)
 
 # Validate symmetry plane projection requirements

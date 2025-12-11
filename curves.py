@@ -295,6 +295,95 @@ class CurveNet(Module):
                 alpha = j * 1.0 / (self.num_bends - 1)
                 weights[j].data.copy_(alpha * weights[-1].data + (1.0 - alpha) * weights[0].data)
 
+    def init_linear_custom(self, alpha=0.5):
+        """
+        Initialize middle bend(s) with custom interpolation ratio.
+
+        Args:
+            alpha: Interpolation ratio. 0.0 = start endpoint, 1.0 = end endpoint, 0.5 = midpoint (default)
+
+        For num_bends=3 (one middle bend):
+            - alpha=0.25: closer to start endpoint
+            - alpha=0.5: exact midpoint (same as init_linear())
+            - alpha=0.75: closer to end endpoint
+        """
+        parameters = list(self.net.parameters())
+        for i in range(0, len(parameters), self.num_bends):
+            weights = parameters[i:i+self.num_bends]
+            for j in range(1, self.num_bends - 1):
+                # Use custom alpha instead of j/(num_bends-1)
+                weights[j].data.copy_(alpha * weights[-1].data + (1.0 - alpha) * weights[0].data)
+
+    def init_perturbed_linear(self, alpha=0.5, noise_scale=0.01):
+        """
+        Initialize middle bend(s) with linear interpolation + Gaussian noise.
+        This moves initialization OFF the direct line between endpoints.
+
+        Args:
+            alpha: Interpolation ratio (0.0 to 1.0)
+            noise_scale: Standard deviation of noise relative to endpoint distance
+        """
+        parameters = list(self.net.parameters())
+        for i in range(0, len(parameters), self.num_bends):
+            weights = parameters[i:i+self.num_bends]
+            w_start = weights[0].data
+            w_end = weights[-1].data
+
+            # Compute endpoint distance for scaling noise
+            endpoint_distance = torch.norm(w_end - w_start).item()
+
+            for j in range(1, self.num_bends - 1):
+                # Start with linear interpolation
+                linear_point = alpha * w_end + (1.0 - alpha) * w_start
+
+                # Add Gaussian noise scaled by endpoint distance
+                noise = torch.randn_like(linear_point) * (noise_scale * endpoint_distance)
+
+                weights[j].data.copy_(linear_point + noise)
+
+    def init_sphere_constrained(self, alpha=0.5, noise_scale=0.01, inside=True):
+        """
+        Initialize middle bend(s) with sphere constraint (controls L2 norm relative to endpoints).
+
+        Args:
+            alpha: Interpolation ratio (0.0 to 1.0)
+            noise_scale: Standard deviation of noise before projection
+            inside: If True, project to radius < endpoint radius (smaller L2 norm)
+                   If False, project to radius > endpoint radius (larger L2 norm)
+
+        This constrains whether the middle point lies inside/outside the multidimensional
+        sphere defined by the endpoints.
+        """
+        parameters = list(self.net.parameters())
+        for i in range(0, len(parameters), self.num_bends):
+            weights = parameters[i:i+self.num_bends]
+            w_start = weights[0].data
+            w_end = weights[-1].data
+
+            # Compute average radius from endpoints
+            r_start = torch.norm(w_start).item()
+            r_end = torch.norm(w_end).item()
+            r_avg = (r_start + r_end) / 2.0
+
+            # Target radius: inside sphere (0.9x) or outside sphere (1.1x)
+            target_radius = r_avg * 0.9 if inside else r_avg * 1.1
+
+            for j in range(1, self.num_bends - 1):
+                # Start with perturbed linear interpolation
+                linear_point = alpha * w_end + (1.0 - alpha) * w_start
+                endpoint_distance = torch.norm(w_end - w_start).item()
+                noise = torch.randn_like(linear_point) * (noise_scale * endpoint_distance)
+                perturbed_point = linear_point + noise
+
+                # Project to target radius sphere
+                current_norm = torch.norm(perturbed_point).item()
+                if current_norm > 1e-10:  # Avoid division by zero
+                    scale_factor = target_radius / current_norm
+                    weights[j].data.copy_(perturbed_point * scale_factor)
+                else:
+                    # Fallback to linear if norm is too small
+                    weights[j].data.copy_(linear_point)
+
     def weights(self, t):
         coeffs_t = self.coeff_layer(t)
         weights = []
