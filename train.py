@@ -372,6 +372,31 @@ if start_epoch == 1:  # Only for new training, not resumed
         print(f"Initial val acc:    {val_res['accuracy']:.2f}%")
         print(f"Initial val err:    {100.0 - val_res['accuracy']:.2f}%")
 
+    # Calculate L2 norm of middle point at epoch 0 for curve models
+    middle_point_l2_norm = None
+    interpolated_l2_norm = None
+    if args.curve is not None:
+        # 1. Calculate L2 norm of the middle trainable point (raw parameters)
+        l2_sum = 0.0
+        for name, param in model.named_parameters():
+            # Middle point parameters have suffix '_1' for 3-bend Bezier curves
+            if '_1' in name and param.requires_grad:
+                l2_sum += torch.sum(param ** 2).item()
+        middle_point_l2_norm = torch.sqrt(torch.tensor(l2_sum)).item()
+
+        # 2. Calculate L2 norm at t=0.5 (interpolated model)
+        t = torch.FloatTensor([0.5]).to(device)
+        weights = model.weights(t)
+        interpolated_l2_norm = np.sqrt(np.sum(np.square(weights)))
+
+        # Track for saving later
+        epochs_list.append(0)
+        middle_point_l2_norms.append(middle_point_l2_norm)
+        interpolated_l2_norms.append(interpolated_l2_norm)
+
+        print(f"Initial middle point L2 norm: {middle_point_l2_norm:.2f}")
+        print(f"Initial interpolated L2 norm: {interpolated_l2_norm:.2f}")
+
     # Log to WandB
     if use_wandb:
         log_dict = {
@@ -383,6 +408,12 @@ if start_epoch == 1:  # Only for new training, not resumed
             'test/accuracy': test_res['accuracy'],
             'test/error': 100.0 - test_res['accuracy'],
         }
+
+        # Add L2 norm of middle point for curve models
+        if middle_point_l2_norm is not None:
+            log_dict['curve/middle_point_l2_norm'] = middle_point_l2_norm
+            log_dict['curve/interpolated_l2_norm'] = interpolated_l2_norm
+
         if args.split_test_from_train and val_res['accuracy'] is not None:
             log_dict.update({
                 'val/loss': val_res['loss'],
