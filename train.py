@@ -62,8 +62,8 @@ parser.add_argument('--init_method', type=str, default='linear',
                     help='initialization method: linear (default), biased (custom alpha), perturbed (with noise), sphere (constrained to sphere)')
 parser.add_argument('--init_alpha', type=float, default=0.5,
                     help='interpolation ratio for biased/perturbed/sphere init (default: 0.5 = midpoint)')
-parser.add_argument('--init_noise', type=float, default=0.01,
-                    help='noise scale for perturbed/sphere init (default: 0.01)')
+parser.add_argument('--init_noise', type=float, default=0.0,
+                    help='noise scale for perturbed/sphere init (default: 0.0)')
 parser.add_argument('--init_inside_sphere', dest='init_inside_sphere', action='store_true',
                     help='for sphere init: project inside sphere (default: outside)')
 parser.set_defaults(init_inside_sphere=False)
@@ -145,7 +145,7 @@ loaders, num_classes = data.loaders(
 )
 
 architecture = getattr(models, args.model)
-
+print('DUPAROMANA1')
 if args.curve is None:
     model = architecture.base(num_classes=num_classes, **architecture.kwargs)
 else:
@@ -161,6 +161,7 @@ else:
     )
     base_model = None
     if args.resume is None:
+        print("AVADA KEDAVRA2")
         for path, k in [(args.init_start, 0), (args.init_end, args.num_bends - 1)]:
             if path is not None:
                 if base_model is None:
@@ -178,6 +179,7 @@ else:
                 print(f'Biased linear initialization with alpha={args.init_alpha}')
                 model.init_linear_custom(alpha=args.init_alpha)
             elif args.init_method == 'perturbed':
+                print("DUPSKORAMA3")
                 print(f'Perturbed linear initialization: alpha={args.init_alpha}, noise_scale={args.init_noise}')
                 model.init_perturbed_linear(alpha=args.init_alpha, noise_scale=args.init_noise)
             elif args.init_method == 'sphere':
