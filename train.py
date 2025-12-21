@@ -145,7 +145,6 @@ loaders, num_classes = data.loaders(
 )
 
 architecture = getattr(models, args.model)
-print('DUPAROMANA1')
 if args.curve is None:
     model = architecture.base(num_classes=num_classes, **architecture.kwargs)
 else:
@@ -161,7 +160,6 @@ else:
     )
     base_model = None
     if args.resume is None:
-        print("AVADA KEDAVRA2")
         for path, k in [(args.init_start, 0), (args.init_end, args.num_bends - 1)]:
             if path is not None:
                 if base_model is None:
@@ -179,7 +177,6 @@ else:
                 print(f'Biased linear initialization with alpha={args.init_alpha}')
                 model.init_linear_custom(alpha=args.init_alpha)
             elif args.init_method == 'perturbed':
-                print("DUPSKORAMA3")
                 print(f'Perturbed linear initialization: alpha={args.init_alpha}, noise_scale={args.init_noise}')
                 model.init_perturbed_linear(alpha=args.init_alpha, noise_scale=args.init_noise)
             elif args.init_method == 'sphere':
@@ -296,6 +293,8 @@ if args.resume is not None:
 columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_nll', 'te_acc', 'time']
 if args.split_test_from_train:
     columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'val_nll', 'val_acc', 'te_nll', 'te_acc', 'time']
+if args.curve is not None:
+    columns.append('mp_l2')
 
 utils.save_checkpoint(
     args.dir,
@@ -551,6 +550,8 @@ for epoch in range(start_epoch, args.epochs + 1):
     else:
         values = [epoch, lr, train_res['loss'], train_res['accuracy'],
                   test_res['nll'], test_res['accuracy'], time_ep]
+    if args.curve is not None:
+        values.append(middle_point_l2_norm)
 
     # Log to wandb if enabled
     if use_wandb:
