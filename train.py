@@ -295,6 +295,7 @@ if args.split_test_from_train:
     columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'val_nll', 'val_acc', 'te_nll', 'te_acc', 'time']
 if args.curve is not None:
     columns.append('mp_l2')
+    columns.append('int_l2')
 
 utils.save_checkpoint(
     args.dir,
@@ -552,6 +553,7 @@ for epoch in range(start_epoch, args.epochs + 1):
                   test_res['nll'], test_res['accuracy'], time_ep]
     if args.curve is not None:
         values.append(middle_point_l2_norm)
+        values.append(interpolated_l2_norm)
 
     # Log to wandb if enabled
     if use_wandb:
