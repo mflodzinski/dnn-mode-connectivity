@@ -91,7 +91,7 @@ l2_norm = np.zeros(T)
 
 previous_weights = None
 
-columns = ['t', 'Train loss', 'Train nll', 'Train error (%)', 'Test nll', 'Test error (%)']
+columns = ['t', 'Train loss', 'Train nll', 'Train error (%)', 'Test nll', 'Test error (%)', 'L2 norm']
 
 t = torch.FloatTensor([0.0]).cuda()
 for i, t_value in enumerate(ts):
@@ -116,7 +116,7 @@ for i, t_value in enumerate(ts):
     # Compute L2 norm of weights at this point
     l2_norm[i] = np.sqrt(np.sum(np.square(weights)))
 
-    values = [t, tr_loss[i], tr_nll[i], tr_err[i], te_nll[i], te_err[i]]
+    values = [t_value, tr_loss[i], tr_nll[i], tr_err[i], te_nll[i], te_err[i], l2_norm[i]]
     table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='10.4f')
     if i % 40 == 0:
         table = table.split('\n')
