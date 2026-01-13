@@ -40,6 +40,32 @@ class Transforms:
 
     CIFAR100 = CIFAR10
 
+    class FashionMNIST:
+
+        class VGG:
+
+            train = transforms.Compose([
+                transforms.Pad(2),  # 28x28 -> 32x32
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomCrop(32, padding=4),
+                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.2860, 0.2860, 0.2860],  # F-MNIST stats replicated 3x
+                    std=[0.3530, 0.3530, 0.3530]
+                )
+            ])
+
+            test = transforms.Compose([
+                transforms.Pad(2),  # 28x28 -> 32x32
+                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.2860, 0.2860, 0.2860],
+                    std=[0.3530, 0.3530, 0.3530]
+                )
+            ])
+
 
 def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
             shuffle_train=True, split_test_from_train=False):
