@@ -70,13 +70,13 @@ class Linear(CurveModule):
         for i, fixed in enumerate(self.fix_points):
             self.register_parameter(
                 'weight_%d' % i,
-                Parameter(torch.Tensor(out_features, in_features), requires_grad=not fixed)
+                Parameter(torch.empty(out_features, in_features), requires_grad=not fixed)
             )
         for i, fixed in enumerate(self.fix_points):
             if bias:
                 self.register_parameter(
                     'bias_%d' % i,
-                    Parameter(torch.Tensor(out_features), requires_grad=not fixed)
+                    Parameter(torch.empty(out_features), requires_grad=not fixed)
                 )
             else:
                 self.register_parameter('bias_%d' % i, None)
@@ -120,7 +120,7 @@ class Conv2d(CurveModule):
             self.register_parameter(
                 'weight_%d' % i,
                 Parameter(
-                    torch.Tensor(out_channels, in_channels // groups, *kernel_size),
+                    torch.empty(out_channels, in_channels // groups, *kernel_size),
                     requires_grad=not fixed
                 )
             )
@@ -128,7 +128,7 @@ class Conv2d(CurveModule):
             if bias:
                 self.register_parameter(
                     'bias_%d' % i,
-                    Parameter(torch.Tensor(out_channels), requires_grad=not fixed)
+                    Parameter(torch.empty(out_channels), requires_grad=not fixed)
                 )
             else:
                 self.register_parameter('bias_%d' % i, None)
