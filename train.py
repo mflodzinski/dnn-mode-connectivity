@@ -101,6 +101,14 @@ parser.add_argument('--split_test_from_train', action='store_true',
 parser.add_argument('--project_symmetry_plane', action='store_true',
                     help='project middle bend to symmetry plane after each optimizer step (requires num_bends=3, fix_start=True, fix_end=True)')
 
+# Random plane projection
+parser.add_argument('--project_random_plane', action='store_true',
+                    help='project middle bend to random plane')
+parser.add_argument('--random_plane_seed', type=int, default=42,
+                    help='seed for random plane normal vector generation (default: 42)')
+parser.add_argument('--random_anchor', action='store_true',
+                    help='use random anchor point for plane (default: use midpoint)')
+
 args = parser.parse_args()
 
 # Initialize wandb if requested
@@ -206,6 +214,33 @@ if args.project_symmetry_plane:
     print("        m = (w₁ + w₂) / 2 (midpoint)")
     print("=" * 80 + "\n")
 
+# Validate random plane projection requirements
+if args.project_random_plane and args.project_symmetry_plane:
+    raise ValueError("Cannot use both --project_random_plane and --project_symmetry_plane")
+
+if args.project_random_plane:
+    if args.curve is None:
+        raise ValueError("--project_random_plane requires --curve to be specified")
+    if args.num_bends != 3:
+        raise ValueError("--project_random_plane requires --num_bends=3 (got {})".format(args.num_bends))
+    if not args.fix_start or not args.fix_end:
+        raise ValueError("--project_random_plane requires --fix_start and --fix_end")
+    if args.init_start is None or args.init_end is None:
+        raise ValueError("--project_random_plane requires --init_start and --init_end")
+
+    anchor_type = "random anchor" if args.random_anchor else "midpoint"
+    print("\n" + "=" * 80)
+    print(f"RANDOM PLANE PROJECTION ENABLED (seed={args.random_plane_seed})")
+    print("=" * 80)
+    print(f"Middle bend will be projected to random plane ({anchor_type}) after each optimizer step")
+    print("Plane constraint: n · (θ - anchor) = 0")
+    print(f"  where n = random unit vector (seed={args.random_plane_seed})")
+    if args.random_anchor:
+        print("        anchor = random point between endpoints")
+    else:
+        print("        anchor = (w₁ + w₂) / 2 (midpoint)")
+    print("=" * 80 + "\n")
+
 
 def project_to_symmetry_plane(model, midpoint_params, normal_params):
     """
@@ -256,9 +291,63 @@ def compute_symmetry_plane_params(model):
     return midpoint_params, normal_params
 
 
-# Compute symmetry plane parameters if needed (once, stays constant)
+def compute_random_plane_params(model, seed=42, random_anchor=False):
+    """Compute random normal vectors for planes.
+
+    Args:
+        model: The curve model
+        seed: Random seed for reproducibility
+        random_anchor: If True, use random anchor point. If False, use midpoint.
+
+    Returns:
+        midpoint_params: List of anchor points (midpoint or random)
+        normal_params: List of random normal vectors
+    """
+    torch.manual_seed(seed)
+
+    midpoint_params = []
+    normal_params = []
+
+    all_params = list(model.net.parameters())
+    num_bends = model.num_bends
+
+    for i in range(0, len(all_params), num_bends):
+        w1_param = all_params[i]      # First endpoint (index 0)
+        w2_param = all_params[i + 2]  # Second endpoint (index 2)
+
+        if random_anchor:
+            # Totally random plane: random anchor point
+            # Sample anchor uniformly between endpoints
+            alpha = torch.rand(1).item()
+            anchor = alpha * w1_param + (1 - alpha) * w2_param
+        else:
+            # Random plane through midpoint
+            anchor = (w1_param + w2_param) / 2.0
+
+        # Random normal vector (same shape as parameters)
+        normal = torch.randn_like(w1_param)
+        normal = normal / torch.norm(normal)  # Normalize
+
+        midpoint_params.append(anchor)  # Still called midpoint_params for compatibility
+        normal_params.append(normal)
+
+    return midpoint_params, normal_params
+
+
+# Compute plane parameters if needed (once, stays constant)
 if args.project_symmetry_plane:
     midpoint_params, normal_params = compute_symmetry_plane_params(model)
+    projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
+elif args.project_random_plane:
+    midpoint_params, normal_params = compute_random_plane_params(
+        model,
+        seed=args.random_plane_seed,
+        random_anchor=args.random_anchor
+    )
+    projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
+    # Note: Same projection function works for all cases - just different anchor/normal vectors
+else:
+    projection_fn = None
 
 
 def learning_rate_schedule(base_lr, epoch, total_epochs):
@@ -448,10 +537,8 @@ for epoch in range(start_epoch, args.epochs + 1):
     lr = learning_rate_schedule(args.lr, epoch, args.epochs)
     utils.adjust_learning_rate(optimizer, lr)
 
-    # Prepare projection function if symmetry plane is enabled
-    projection_fn = None
-    if args.project_symmetry_plane:
-        projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
+    # Prepare projection function if plane projection is enabled
+    # (projection_fn was set earlier based on args.project_symmetry_plane or args.project_random_plane)
 
     train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer, projection_fn=projection_fn)
 
