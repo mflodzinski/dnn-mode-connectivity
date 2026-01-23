@@ -93,7 +93,7 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
 
         # Shuffle combined dataset with fixed seed for reproducibility
         indices = np.arange(60000)
-        np.random.seed(42)  # Fixed seed for reproducibility
+        np.random.seed(142)  # Fixed seed for reproducibility
         np.random.shuffle(indices)
 
         combined_data = combined_data[indices]
