@@ -80,8 +80,7 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
 
     if use_test:
         print('You are going to run models on the test set. Are you sure?')
-        # make test_set basically train set in terms of the same images
-        test_set = ds(path, train=True, download=True, transform=transform.train)
+        test_set = ds(path, train=False, download=True, transform=transform.train)
         val_set = None
     else:
         if split_test_from_train:
