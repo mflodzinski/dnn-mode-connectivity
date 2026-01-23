@@ -79,8 +79,34 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     train_set = ds(path, train=True, download=True, transform=transform.train)
 
     if use_test:
-        print('You are going to run models on the test set. Are you sure?')
+        print('Combining train (50K) and test (10K) sets, shuffling, then splitting to 50K train + 10K test')
+
+        # Load original test set
+        original_test_set = ds(path, train=False, download=True, transform=transform.train)
+
+        # Combine train (50K) + test (10K) = 60K total
+        combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
+        combined_targets = train_set.targets + original_test_set.targets
+
+        # Convert targets to numpy array for shuffling
+        combined_targets = np.array(combined_targets)
+
+        # Shuffle combined dataset with fixed seed for reproducibility
+        indices = np.arange(60000)
+        np.random.seed(42)  # Fixed seed for reproducibility
+        np.random.shuffle(indices)
+
+        combined_data = combined_data[indices]
+        combined_targets = combined_targets[indices]
+
+        # Split: first 50K for train, last 10K for test
+        train_set.data = combined_data[:50000]
+        train_set.targets = combined_targets[:50000].tolist()
+
         test_set = ds(path, train=False, download=True, transform=transform.train)
+        test_set.data = combined_data[50000:60000]
+        test_set.targets = combined_targets[50000:60000].tolist()
+
         val_set = None
     else:
         if split_test_from_train:
