@@ -76,13 +76,13 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     ds = getattr(torchvision.datasets, dataset)
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
-    train_set = ds(path, train=True, download=True, transform=transform.train)
+    train_set = ds(path, train=True, download=True, transform=transform.test)
 
     if use_test:
         print('Combining train (50K) and test (10K) sets, shuffling, then splitting to 50K train + 10K test')
 
         # Load original test set
-        original_test_set = ds(path, train=False, download=True, transform=transform.train)
+        original_test_set = ds(path, train=False, download=True, transform=transform.test)
 
         # Combine train (50K) + test (10K) = 60K total
         combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
@@ -103,7 +103,7 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
         train_set.data = combined_data[:50000]
         train_set.targets = combined_targets[:50000].tolist()
 
-        test_set = ds(path, train=False, download=True, transform=transform.train)
+        test_set = ds(path, train=False, download=True, transform=transform.test)
         test_set.data = combined_data[50000:60000]
         test_set.targets = combined_targets[50000:60000].tolist()
 
