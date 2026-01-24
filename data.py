@@ -88,7 +88,10 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
 
     print(f'Combining {dataset}: train ({train_size}) + test ({test_size}) = {total_size} total, then shuffling and splitting back')
 
-    # Combine train + test
+    # Store original data type (tensor for FashionMNIST, numpy for CIFAR)
+    original_data_is_tensor = isinstance(train_set.data, torch.Tensor)
+
+    # Combine train + test (convert to numpy for shuffling)
     combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
 
     # Handle different target types (list for CIFAR, tensor for FashionMNIST)
@@ -109,13 +112,25 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     combined_data = combined_data[indices]
     combined_targets = combined_targets[indices]
 
-    # Split back to original proportions
-    train_set.data = combined_data[:train_size]
-    train_set.targets = combined_targets[:train_size].tolist()
+    # Split back to original proportions and restore original data type
+    if original_data_is_tensor:
+        # FashionMNIST: restore tensor type
+        train_set.data = torch.from_numpy(combined_data[:train_size])
+        train_set.targets = combined_targets[:train_size].tolist()
+    else:
+        # CIFAR: keep as numpy array
+        train_set.data = combined_data[:train_size]
+        train_set.targets = combined_targets[:train_size].tolist()
 
     test_set = ds(path, train=False, download=True, transform=transform.test)
-    test_set.data = combined_data[train_size:total_size]
-    test_set.targets = combined_targets[train_size:total_size].tolist()
+    if original_data_is_tensor:
+        # FashionMNIST: restore tensor type
+        test_set.data = torch.from_numpy(combined_data[train_size:total_size])
+        test_set.targets = combined_targets[train_size:total_size].tolist()
+    else:
+        # CIFAR: keep as numpy array
+        test_set.data = combined_data[train_size:total_size]
+        test_set.targets = combined_targets[train_size:total_size].tolist()
 
     val_set = None
 
