@@ -77,60 +77,47 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
     train_set = ds(path, train=True, download=True, transform=transform.test)
-
-    # Load original test set
-    original_test_set = ds(path, train=False, download=True, transform=transform.test)
-
-    # Get dataset sizes
-    train_size = len(train_set.data)
-    test_size = len(original_test_set.data)
-    total_size = train_size + test_size
-
-    print(f'Combining {dataset}: train ({train_size}) + test ({test_size}) = {total_size} total, then shuffling and splitting back')
-
-    # Store original data type (tensor for FashionMNIST, numpy for CIFAR)
-    original_data_is_tensor = isinstance(train_set.data, torch.Tensor)
-
-    # Combine train + test (convert to numpy for shuffling)
-    combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
-
-    # Handle different target types (list for CIFAR, tensor for FashionMNIST)
-    if isinstance(train_set.targets, torch.Tensor):
-        # FashionMNIST case: targets are tensors
-        combined_targets = torch.cat([train_set.targets, original_test_set.targets], dim=0)
-        combined_targets = combined_targets.numpy()
-    else:
-        # CIFAR case: targets are lists
-        combined_targets = train_set.targets + original_test_set.targets
-        combined_targets = np.array(combined_targets)
-
-    # Shuffle with fixed seed for reproducibility
-    indices = np.arange(total_size)
-    np.random.seed(412)  # Fixed seed for reproducibility
-    np.random.shuffle(indices)
-
-    combined_data = combined_data[indices]
-    combined_targets = combined_targets[indices]
-
-    # Split back to original proportions and restore original data type
-    if original_data_is_tensor:
-        # FashionMNIST: restore tensor type
-        train_set.data = torch.from_numpy(combined_data[:train_size])
-        train_set.targets = combined_targets[:train_size].tolist()
-    else:
-        # CIFAR: keep as numpy array
-        train_set.data = combined_data[:train_size]
-        train_set.targets = combined_targets[:train_size].tolist()
-
     test_set = ds(path, train=False, download=True, transform=transform.test)
-    if original_data_is_tensor:
-        # FashionMNIST: restore tensor type
-        test_set.data = torch.from_numpy(combined_data[train_size:total_size])
-        test_set.targets = combined_targets[train_size:total_size].tolist()
-    else:
-        # CIFAR: keep as numpy array
-        test_set.data = combined_data[train_size:total_size]
-        test_set.targets = combined_targets[train_size:total_size].tolist()
+
+    # If use_test is True, shuffle the order within each split (train stays train, test stays test)
+    if use_test:
+        print(f'Shuffling {dataset}: train ({len(train_set.data)}) and test ({len(test_set.data)}) splits independently')
+
+        # Store original data type (tensor for FashionMNIST, numpy for CIFAR)
+        train_is_tensor = isinstance(train_set.data, torch.Tensor)
+        test_is_tensor = isinstance(test_set.data, torch.Tensor)
+
+        # Shuffle train set
+        train_size = len(train_set.data)
+        train_indices = np.arange(train_size)
+        np.random.seed(412)  # Fixed seed for reproducibility
+        np.random.shuffle(train_indices)
+
+        if train_is_tensor:
+            train_set.data = train_set.data[train_indices]
+            train_set.targets = torch.tensor(train_set.targets)[train_indices].tolist()
+        else:
+            train_set.data = train_set.data[train_indices]
+            if isinstance(train_set.targets, list):
+                train_set.targets = [train_set.targets[i] for i in train_indices]
+            else:
+                train_set.targets = np.array(train_set.targets)[train_indices].tolist()
+
+        # Shuffle test set
+        test_size = len(test_set.data)
+        test_indices = np.arange(test_size)
+        np.random.seed(413)  # Different seed for test set
+        np.random.shuffle(test_indices)
+
+        if test_is_tensor:
+            test_set.data = test_set.data[test_indices]
+            test_set.targets = torch.tensor(test_set.targets)[test_indices].tolist()
+        else:
+            test_set.data = test_set.data[test_indices]
+            if isinstance(test_set.targets, list):
+                test_set.targets = [test_set.targets[i] for i in test_indices]
+            else:
+                test_set.targets = np.array(test_set.targets)[test_indices].tolist()
 
     val_set = None
 
