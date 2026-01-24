@@ -90,10 +90,15 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
 
     # Combine train + test
     combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
-    combined_targets = train_set.targets + original_test_set.targets
 
-    # Convert targets to numpy array for shuffling
-    if isinstance(combined_targets, list):
+    # Handle different target types (list for CIFAR, tensor for FashionMNIST)
+    if isinstance(train_set.targets, torch.Tensor):
+        # FashionMNIST case: targets are tensors
+        combined_targets = torch.cat([train_set.targets, original_test_set.targets], dim=0)
+        combined_targets = combined_targets.numpy()
+    else:
+        # CIFAR case: targets are lists
+        combined_targets = train_set.targets + original_test_set.targets
         combined_targets = np.array(combined_targets)
 
     # Shuffle with fixed seed for reproducibility
