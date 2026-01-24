@@ -78,48 +78,42 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     transform = getattr(getattr(Transforms, dataset), transform_name)
     train_set = ds(path, train=True, download=True, transform=transform.test)
 
-    if use_test:
-        print('You are going to run models on the test set. Are you sure?')
-        test_set = ds(path, train=False, download=True, transform=transform.test)
-        val_set = None
-    else:
-        if split_test_from_train:
-            # 3-way split: train (40K) + val (5K) + test (5K) from training data
-            print("Using train (40000) + validation (5000) + test (5000)")
-            full_train_data = train_set.data
-            full_train_targets = train_set.targets
+    # Load original test set
+    original_test_set = ds(path, train=False, download=True, transform=transform.test)
 
-            # Train: indices 0-39999
-            train_set.data = full_train_data[:40000]
-            train_set.targets = full_train_targets[:40000]
+    # Get dataset sizes
+    train_size = len(train_set.data)
+    test_size = len(original_test_set.data)
+    total_size = train_size + test_size
 
-            # Validation: indices 40000-44999
-            val_set = ds(path, train=True, download=True, transform=transform.test)
-            val_set.train = False
-            val_set.data = full_train_data[40000:45000]
-            val_set.targets = full_train_targets[40000:45000]
+    print(f'Combining {dataset}: train ({train_size}) + test ({test_size}) = {total_size} total, then shuffling and splitting back')
 
-            # Test: indices 45000-49999
-            test_set = ds(path, train=True, download=True, transform=transform.test)
-            test_set.train = False
-            test_set.data = full_train_data[45000:50000]
-            test_set.targets = full_train_targets[45000:50000]
-        else:
-            # 2-way split: train (45K) + validation (5K) - original behavior but fixed
-            print("Using train (45000) + validation (5000)")
-            full_train_data = train_set.data
-            full_train_targets = train_set.targets
+    # Combine train + test
+    combined_data = np.concatenate([train_set.data, original_test_set.data], axis=0)
+    combined_targets = train_set.targets + original_test_set.targets
 
-            # Train: indices 0-44999
-            train_set.data = full_train_data[:45000]
-            train_set.targets = full_train_targets[:45000]
+    # Convert targets to numpy array for shuffling
+    if isinstance(combined_targets, list):
+        combined_targets = np.array(combined_targets)
 
-            # Validation: indices 45000-49999
-            test_set = ds(path, train=True, download=True, transform=transform.test)
-            test_set.train = False
-            test_set.data = full_train_data[45000:50000]
-            test_set.targets = full_train_targets[45000:50000]
-            val_set = None
+    # Shuffle with fixed seed for reproducibility
+    indices = np.arange(total_size)
+    np.random.seed(412)  # Fixed seed for reproducibility
+    np.random.shuffle(indices)
+
+    combined_data = combined_data[indices]
+    combined_targets = combined_targets[indices]
+
+    # Split back to original proportions
+    train_set.data = combined_data[:train_size]
+    train_set.targets = combined_targets[:train_size].tolist()
+
+    test_set = ds(path, train=False, download=True, transform=transform.test)
+    test_set.data = combined_data[train_size:total_size]
+    test_set.targets = combined_targets[train_size:total_size].tolist()
+
+    val_set = None
+
 
     # pin_memory not supported on MPS
     pin_mem = not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
