@@ -73,6 +73,8 @@ parser.add_argument('--resume', type=str, default=None, metavar='CKPT',
 
 parser.add_argument('--epochs', type=int, default=200, metavar='N',
                     help='number of epochs to train (default: 200)')
+parser.add_argument('--lr_schedule_epochs', type=int, default=None, metavar='N',
+                    help='total epochs for LR schedule calculation (default: same as --epochs)')
 parser.add_argument('--save_freq', type=int, default=50, metavar='N',
                     help='save frequency (default: 50)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
@@ -534,7 +536,8 @@ for epoch in range(start_epoch, args.epochs + 1):
 
     time_ep = time.time()
 
-    lr = learning_rate_schedule(args.lr, epoch, args.epochs)
+    lr_schedule_total = args.lr_schedule_epochs if args.lr_schedule_epochs else args.epochs
+    lr = learning_rate_schedule(args.lr, epoch, lr_schedule_total)
     utils.adjust_learning_rate(optimizer, lr)
 
     # Prepare projection function if plane projection is enabled
