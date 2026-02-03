@@ -61,7 +61,8 @@ if args.dataset is not None:
         args.batch_size,
         args.num_workers,
         args.transform,
-        args.use_test
+        args.use_test,
+        eval_mode=True  # No augmentation during evaluation
     )
     loader = loaders['test']
 else:

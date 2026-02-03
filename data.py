@@ -68,7 +68,7 @@ class Transforms:
 
 
 def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=False,
-            shuffle_train=True, split_test_from_train=False):
+            shuffle_train=True, split_test_from_train=False, eval_mode=False):
     # MPS doesn't work well with multiprocessing, use 0 workers
     if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         num_workers = 0
@@ -76,7 +76,9 @@ def loaders(dataset, path, batch_size, num_workers, transform_name, use_test=Fal
     ds = getattr(torchvision.datasets, dataset)
     path = os.path.join(path, dataset.lower())
     transform = getattr(getattr(Transforms, dataset), transform_name)
-    train_set = ds(path, train=True, download=True, transform=transform.test)
+    # Use test transform (no augmentation) for train set during evaluation
+    train_transform = transform.test if eval_mode else transform.train
+    train_set = ds(path, train=True, download=True, transform=train_transform)
 
     print('You are going to run models on the test set. Are you sure?')
     test_set = ds(path, train=False, download=True, transform=transform.test)
