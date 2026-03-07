@@ -77,6 +77,8 @@ parser.add_argument('--lr_schedule_epochs', type=int, default=None, metavar='N',
                     help='total epochs for LR schedule calculation (default: same as --epochs)')
 parser.add_argument('--save_freq', type=int, default=50, metavar='N',
                     help='save frequency (default: 50)')
+parser.add_argument('--skip_eval', action='store_true',
+                    help='skip initial and per-epoch train/test evaluation during training')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='initial learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
@@ -381,8 +383,8 @@ if args.resume is not None:
     model.load_state_dict(checkpoint['model_state'])
     optimizer.load_state_dict(checkpoint['optimizer_state'])
 
-columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_nll', 'te_acc', 'time']
-if args.split_test_from_train:
+columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'time'] if args.skip_eval else ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_nll', 'te_acc', 'time']
+if args.split_test_from_train and not args.skip_eval:
     columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'val_nll', 'val_acc', 'te_nll', 'te_acc', 'time']
 if args.curve is not None:
     columns.append('mp_l2')
@@ -424,7 +426,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 # Evaluate initial model (epoch 0) before training
-if start_epoch == 1:  # Only for new training, not resumed
+if start_epoch == 1 and not args.skip_eval:  # Only for new training, not resumed
     print("\n" + "=" * 80)
     print("INITIAL EVALUATION (Epoch 0 - Before Training)")
     print("=" * 80)
@@ -546,17 +548,18 @@ for epoch in range(start_epoch, args.epochs + 1):
     train_res = utils.train(loaders['train'], model, optimizer, criterion, regularizer, projection_fn=projection_fn)
 
     # Evaluate on validation set if 3-way split is used
-    if args.split_test_from_train and 'val' in loaders:
-        if args.curve is None or not has_bn:
-            val_res = utils.test(loaders['val'], model, criterion, regularizer)
-            test_res = utils.test(loaders['test'], model, criterion, regularizer)
-    else:
-        # Standard 2-way split: test is actually validation
-        if args.curve is None or not has_bn:
-            test_res = utils.test(loaders['test'], model, criterion, regularizer)
+    if not args.skip_eval:
+        if args.split_test_from_train and 'val' in loaders:
+            if args.curve is None or not has_bn:
+                val_res = utils.test(loaders['val'], model, criterion, regularizer)
+                test_res = utils.test(loaders['test'], model, criterion, regularizer)
+        else:
+            # Standard 2-way split: test is actually validation
+            if args.curve is None or not has_bn:
+                test_res = utils.test(loaders['test'], model, criterion, regularizer)
 
     # Early stopping logic (only for non-curve models)
-    if args.early_stopping and args.curve is None:
+    if args.early_stopping and args.curve is None and not args.skip_eval:
         # Use validation set if available (3-way split), otherwise use test set
         if args.split_test_from_train and val_res['accuracy'] is not None:
             val_error = 100.0 - val_res['accuracy']
@@ -634,7 +637,9 @@ for epoch in range(start_epoch, args.epochs + 1):
         interpolated_l2_norms.append(interpolated_l2_norm)
 
     # Prepare values for logging
-    if args.split_test_from_train:
+    if args.skip_eval:
+        values = [epoch, lr, train_res['loss'], train_res['accuracy'], time_ep]
+    elif args.split_test_from_train:
         values = [epoch, lr, train_res['loss'], train_res['accuracy'],
                   val_res['nll'], val_res['accuracy'],
                   test_res['nll'], test_res['accuracy'], time_ep]
@@ -661,7 +666,9 @@ for epoch in range(start_epoch, args.epochs + 1):
             log_dict['curve/middle_point_l2_norm'] = middle_point_l2_norm
             log_dict['curve/interpolated_l2_norm'] = interpolated_l2_norm
 
-        if args.split_test_from_train and 'val' in loaders:
+        if args.skip_eval:
+            pass
+        elif args.split_test_from_train and 'val' in loaders:
             log_dict.update({
                 'val/nll': val_res['nll'] if val_res['nll'] is not None else 0,
                 'val/accuracy': val_res['accuracy'] if val_res['accuracy'] is not None else 0,
