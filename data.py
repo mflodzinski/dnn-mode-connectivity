@@ -56,6 +56,31 @@ class Transforms:
                 )
             ])
 
+    class MNIST:
+
+        class VGG:
+
+            train = transforms.Compose([
+                transforms.Pad(2),  # 28x28 -> 32x32
+                transforms.RandomCrop(32, padding=4),
+                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.1307, 0.1307, 0.1307],  # MNIST stats replicated 3x
+                    std=[0.3081, 0.3081, 0.3081]
+                )
+            ])
+
+            test = transforms.Compose([
+                transforms.Pad(2),  # 28x28 -> 32x32
+                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.1307, 0.1307, 0.1307],
+                    std=[0.3081, 0.3081, 0.3081]
+                )
+            ])
+
             test = transforms.Compose([
                 transforms.Pad(2),  # 28x28 -> 32x32
                 transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
