@@ -56,6 +56,16 @@ class Transforms:
                 )
             ])
 
+            test = transforms.Compose([
+                transforms.Pad(2),  # 28x28 -> 32x32
+                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.2860, 0.2860, 0.2860],
+                    std=[0.3530, 0.3530, 0.3530]
+                )
+            ])
+
     class MNIST:
 
         class VGG:
@@ -78,16 +88,6 @@ class Transforms:
                 transforms.Normalize(
                     mean=[0.1307, 0.1307, 0.1307],
                     std=[0.3081, 0.3081, 0.3081]
-                )
-            ])
-
-            test = transforms.Compose([
-                transforms.Pad(2),  # 28x28 -> 32x32
-                transforms.Grayscale(num_output_channels=3),  # Convert 1->3 channels
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.2860, 0.2860, 0.2860],
-                    std=[0.3530, 0.3530, 0.3530]
                 )
             ])
 
