@@ -36,6 +36,8 @@ parser.add_argument('--batch_size', type=int, default=128, metavar='N',
                     help='input batch size (default: 128)')
 parser.add_argument('--num-workers', type=int, default=4, metavar='N',
                     help='number of workers (default: 4)')
+parser.add_argument('--no_train_aug', action='store_true',
+                    help='use the test transform for the training loader (disables train-time augmentation)')
 
 parser.add_argument('--model', type=str, default=None, metavar='MODEL', required=True,
                     help='model name (default: None)')
@@ -153,7 +155,8 @@ loaders, num_classes = data.loaders(
     args.num_workers,
     args.transform,
     args.use_test,
-    split_test_from_train=args.split_test_from_train
+    split_test_from_train=args.split_test_from_train,
+    eval_mode=args.no_train_aug,
 )
 
 architecture = getattr(models, args.model)
