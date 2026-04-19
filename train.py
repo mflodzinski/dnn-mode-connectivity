@@ -38,6 +38,8 @@ parser.add_argument('--num-workers', type=int, default=4, metavar='N',
                     help='number of workers (default: 4)')
 parser.add_argument('--no_train_aug', action='store_true',
                     help='use the test transform for the training loader (disables train-time augmentation)')
+parser.add_argument('--train_half_only', action='store_true',
+                    help='for curve models, train using only the first half of the path (t in [0, 0.5])')
 
 parser.add_argument('--model', type=str, default=None, metavar='MODEL', required=True,
                     help='model name (default: None)')
@@ -201,6 +203,18 @@ else:
             else:
                 raise ValueError(f'Unknown init_method: {args.init_method}')
 model.to(device)
+
+if args.curve is not None and args.train_half_only:
+    model.train_t_min = 0.0
+    model.train_t_max = 0.5
+    print("\n" + "=" * 80)
+    print("HALF-PATH TRAINING ENABLED")
+    print("=" * 80)
+    print("During training, t is sampled only from [0.0, 0.5].")
+    print("For a 3-bend PolyChain with a midpoint constrained to a plane,")
+    print("this corresponds to optimizing only the first half-path; the")
+    print("second half is then determined by the same midpoint geometry.")
+    print("=" * 80 + "\n")
 
 # Validate symmetry plane projection requirements
 if args.project_symmetry_plane:
