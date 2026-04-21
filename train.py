@@ -114,6 +114,8 @@ parser.add_argument('--project_random_plane', action='store_true',
                     help='project middle bend to random plane')
 parser.add_argument('--random_plane_seed', type=int, default=42,
                     help='seed for random plane normal vector generation (default: 42)')
+parser.add_argument('--random_plane_codim', type=int, default=1,
+                    help='number of global random directions to remove for random-plane projection (default: 1)')
 parser.add_argument('--random_anchor', action='store_true',
                     help='use random anchor point for plane (default: use midpoint)')
 
@@ -249,13 +251,16 @@ if args.project_random_plane:
     if args.init_start is None or args.init_end is None:
         raise ValueError("--project_random_plane requires --init_start and --init_end")
 
+    if args.random_plane_codim < 1:
+        raise ValueError("--random_plane_codim must be >= 1")
+
     anchor_type = "random anchor" if args.random_anchor else "midpoint"
     print("\n" + "=" * 80)
-    print(f"RANDOM PLANE PROJECTION ENABLED (seed={args.random_plane_seed})")
+    print(f"RANDOM PLANE PROJECTION ENABLED (seed={args.random_plane_seed}, codim={args.random_plane_codim})")
     print("=" * 80)
-    print(f"Middle bend will be projected to random plane ({anchor_type}) after each optimizer step")
-    print("Plane constraint: n · (θ - anchor) = 0")
-    print(f"  where n = random unit vector (seed={args.random_plane_seed})")
+    print(f"Middle bend will be projected to random affine subspace ({anchor_type}) after each optimizer step")
+    print("Subspace constraint: Nᵀ · (θ - anchor) = 0")
+    print(f"  where N contains {args.random_plane_codim} orthonormal random direction(s)")
     if args.random_anchor:
         print("        anchor = random point between endpoints")
     else:
@@ -355,18 +360,99 @@ def compute_random_plane_params(model, seed=42, random_anchor=False):
     return midpoint_params, normal_params
 
 
+def _flatten_params(params):
+    """Flatten a list of tensors into one vector."""
+    return torch.cat([param.reshape(-1) for param in params])
+
+
+def _copy_flat_to_params(flat, params):
+    """Copy a flat vector back into a list of parameter tensors."""
+    offset = 0
+    for param in params:
+        numel = param.numel()
+        param.copy_(flat[offset:offset + numel].view_as(param))
+        offset += numel
+
+
+def _middle_bend_params(model):
+    """Return the trainable middle-bend parameters for a 3-bend curve."""
+    all_params = list(model.net.parameters())
+    num_bends = model.num_bends
+    return [all_params[i + 1] for i in range(0, len(all_params), num_bends)]
+
+
+def _endpoint_params(model, endpoint_index):
+    """Return endpoint parameters for a 3-bend curve."""
+    all_params = list(model.net.parameters())
+    num_bends = model.num_bends
+    return [all_params[i + endpoint_index] for i in range(0, len(all_params), num_bends)]
+
+
+def _orthonormal_random_directions_like(reference, codim, generator):
+    """Generate codim orthonormal random vectors with the same shape as reference."""
+    directions = []
+    for _ in range(codim):
+        direction = torch.randn(
+            reference.shape,
+            device=reference.device,
+            dtype=reference.dtype,
+            generator=generator,
+        )
+        for previous in directions:
+            direction = direction - torch.dot(direction, previous) * previous
+        norm = torch.norm(direction)
+        if norm < 1e-12:
+            raise RuntimeError("Failed to generate an independent random direction")
+        directions.append(direction / norm)
+    return directions
+
+
+def compute_global_random_subspace_params(model, seed=42, random_anchor=False, codim=1):
+    """Compute a global random affine subspace for midpoint projection.
+
+    The subspace is defined by N^T (theta - anchor) = 0, where N contains
+    codim orthonormal random directions in the full flattened parameter space.
+    """
+    middle_params = _middle_bend_params(model)
+    w_start = _flatten_params(_endpoint_params(model, 0)).detach()
+    w_end = _flatten_params(_endpoint_params(model, 2)).detach()
+
+    generator = torch.Generator(device=w_start.device)
+    generator.manual_seed(seed)
+
+    if random_anchor:
+        alpha = torch.rand(1, device=w_start.device, generator=generator).item()
+        anchor = alpha * w_start + (1.0 - alpha) * w_end
+    else:
+        anchor = 0.5 * (w_start + w_end)
+
+    directions = _orthonormal_random_directions_like(w_start, codim, generator)
+    return middle_params, anchor, directions
+
+
+def project_to_global_random_subspace(model, middle_params, anchor, directions):
+    """Project the middle bend onto a global codimension-k affine subspace."""
+    with torch.no_grad():
+        theta = _flatten_params(middle_params)
+        displacement = theta - anchor
+        correction = torch.zeros_like(theta)
+        for direction in directions:
+            correction.add_(torch.dot(displacement, direction) * direction)
+        _copy_flat_to_params(theta - correction, middle_params)
+
+
 # Compute plane parameters if needed (once, stays constant)
 if args.project_symmetry_plane:
     midpoint_params, normal_params = compute_symmetry_plane_params(model)
     projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
 elif args.project_random_plane:
-    midpoint_params, normal_params = compute_random_plane_params(
+    middle_params, anchor, directions = compute_global_random_subspace_params(
         model,
         seed=args.random_plane_seed,
-        random_anchor=args.random_anchor
+        random_anchor=args.random_anchor,
+        codim=args.random_plane_codim
     )
-    projection_fn = lambda: project_to_symmetry_plane(model, midpoint_params, normal_params)
-    # Note: Same projection function works for all cases - just different anchor/normal vectors
+    projection_fn = lambda: project_to_global_random_subspace(model, middle_params, anchor, directions)
 else:
     projection_fn = None
 
