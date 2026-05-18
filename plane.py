@@ -67,7 +67,8 @@ loaders, num_classes = data.loaders(
     args.num_workers,
     args.transform,
     args.use_test,
-    shuffle_train=False
+    shuffle_train=False,
+    eval_mode=True  # No augmentation during evaluation
 )
 
 architecture = getattr(models, args.model)

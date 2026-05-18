@@ -40,7 +40,9 @@ def save_checkpoint(dir, epoch, name='checkpoint', **kwargs):
     torch.save(state, filepath)
 
 
-def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedule=None):
+def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedule=None, device=None, projection_fn=None):
+    if device is None:
+        device = next(model.parameters()).device
     loss_sum = 0.0
     correct = 0.0
 
@@ -50,8 +52,8 @@ def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedu
         if lr_schedule is not None:
             lr = lr_schedule(iter / num_iters)
             adjust_learning_rate(optimizer, lr)
-        input = input.cuda(async=True)
-        target = target.cuda(async=True)
+        input = input.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
 
         output = model(input)
         loss = criterion(output, target)
@@ -61,6 +63,10 @@ def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedu
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # Apply projection if provided (e.g., for symmetry plane constraint)
+        if projection_fn is not None:
+            projection_fn()
 
         loss_sum += loss.item() * input.size(0)
         pred = output.data.argmax(1, keepdim=True)
@@ -72,7 +78,9 @@ def train(train_loader, model, optimizer, criterion, regularizer=None, lr_schedu
     }
 
 
-def test(test_loader, model, criterion, regularizer=None, **kwargs):
+def test(test_loader, model, criterion, regularizer=None, device=None, **kwargs):
+    if device is None:
+        device = next(model.parameters()).device
     loss_sum = 0.0
     nll_sum = 0.0
     correct = 0.0
@@ -80,8 +88,8 @@ def test(test_loader, model, criterion, regularizer=None, **kwargs):
     model.eval()
 
     for input, target in test_loader:
-        input = input.cuda(async=True)
-        target = target.cuda(async=True)
+        input = input.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
 
         output = model(input, **kwargs)
         nll = criterion(output, target)
@@ -102,12 +110,14 @@ def test(test_loader, model, criterion, regularizer=None, **kwargs):
 
 
 
-def predictions(test_loader, model, **kwargs):
+def predictions(test_loader, model, device=None, **kwargs):
+    if device is None:
+        device = next(model.parameters()).device
     model.eval()
     preds = []
     targets = []
     for input, target in test_loader:
-        input = input.cuda(async=True)
+        input = input.to(device, non_blocking=True)
         output = model(input, **kwargs)
         probs = F.softmax(output, dim=1)
         preds.append(probs.cpu().data.numpy())
@@ -146,7 +156,9 @@ def _set_momenta(module, momenta):
         module.momentum = momenta[module]
 
 
-def update_bn(loader, model, **kwargs):
+def update_bn(loader, model, device=None, **kwargs):
+    if device is None:
+        device = next(model.parameters()).device
     if not check_bn(model):
         return
     model.train()
@@ -155,7 +167,7 @@ def update_bn(loader, model, **kwargs):
     model.apply(lambda module: _get_momenta(module, momenta))
     num_samples = 0
     for input, _ in loader:
-        input = input.cuda(async=True)
+        input = input.to(device, non_blocking=True)
         batch_size = input.data.size(0)
 
         momentum = batch_size / (num_samples + batch_size)

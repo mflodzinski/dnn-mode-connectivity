@@ -40,7 +40,8 @@ loaders, num_classes = data.loaders(
     args.batch_size,
     args.num_workers,
     args.transform,
-    args.use_test
+    args.use_test,
+    eval_mode=True  # No augmentation during evaluation
 )
 
 architecture = getattr(models, args.model)
